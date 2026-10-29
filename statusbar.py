@@ -111,8 +111,58 @@ def save(path, data):
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def ask(prompt, default):
-    return input(f"{prompt} [{default}]: ").strip() or default
+def ask(prompt, count):
+    while True:
+        answer = input(f"{prompt} [1]: ").strip() or "1"
+        if answer.isdigit() and 1 <= int(answer) <= count:
+            return int(answer)
+        print(f"  Enter a number from 1 to {count}.")
+
+
+def key():
+    if os.name == "nt":
+        import msvcrt
+        c = msvcrt.getwch()
+        if c in ("\x00", "\xe0"):
+            return {"H": "up", "P": "down"}.get(msvcrt.getwch())
+    else:
+        import termios
+        import tty
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            c = sys.stdin.read(1)
+            if c == "\x1b":
+                return {"[A": "up", "[B": "down"}.get(sys.stdin.read(2))
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    if c == "\x03":
+        raise KeyboardInterrupt
+    return c
+
+
+def pick_segments():
+    if not sys.stdin.isatty():
+        return SEGMENTS
+    items = SEGMENTS + ["Continue"]
+    chosen, pos = set(SEGMENTS), 0
+    print("\nSegments  (↑/↓ move, Enter toggle)")
+    while True:
+        for i, item in enumerate(items):
+            pointer = paint(36, "❯") if i == pos else " "
+            mark = "   " if item == "Continue" else f"[{paint(32, '✔')}]" if item in chosen else "[ ]"
+            print(f"\033[2K  {pointer} {mark} {item}")
+        k = key()
+        if k == "up":
+            pos = (pos - 1) % len(items)
+        elif k == "down":
+            pos = (pos + 1) % len(items)
+        elif k in ("\r", "\n", " "):
+            if items[pos] == "Continue":
+                return [s for s in SEGMENTS if s in chosen]
+            chosen ^= {items[pos]}
+        print(f"\033[{len(items)}A", end="")
 
 
 def install(previous):
@@ -121,10 +171,8 @@ def install(previous):
     print("\nDesigns:")
     for i, name in enumerate(names, 1):
         print(f"  {i}) {name:<8} {render(SAMPLE, {**full, 'design': name})}")
-    choice = ask("Design", "1")
-    design = names[int(choice) - 1] if choice.isdigit() and 1 <= int(choice) <= len(names) else names[0]
-    print("\nSegments:")
-    segments = [s for s in SEGMENTS if ask(f"  Show {s}? (y/n)", "y").lower().startswith("y")]
+    design = names[ask("Design", len(names)) - 1]
+    segments = pick_segments()
     cfg = {"design": design, "segments": segments, "previous": previous}
     print(f"\nPreview: {render(SAMPLE, cfg)}\n")
 
@@ -157,10 +205,10 @@ def setup():
         HOME.mkdir(parents=True, exist_ok=True)
         return install(load(SETTINGS).get("statusLine"))
     print("Status bar is already installed.\n  1) Reinstall\n  2) Remove\n  3) Exit")
-    choice = ask("Choose", "1")
-    if choice == "1":
+    choice = ask("Choose", 3)
+    if choice == 1:
         install(cfg.get("previous"))
-    elif choice == "2":
+    elif choice == 2:
         remove(cfg)
 
 
